@@ -7,6 +7,7 @@
 #include <mpi.h>
 #include <utility>  // For pair
 #include "graph.h"
+#include <climits>
 
 using namespace std;
 
@@ -209,16 +210,168 @@ idx_t n = 0;
 
 	std::cout << "Process " << rank << " found " << wedges.size() 
               << " wedges\n";
-    if (!wedges.empty()) {
+    if (!wedges.empty()) 
+    {
         const auto& [u, w, v] = wedges[0];
         std::cout << "Sample wedge: (" << u << ", " << w << ", " << v << ")\n";
     }
 
-	
-	
+	auto local_counts = g.count_edges();
+	// Prepare MPI buffers
+    std::vector<int> edge_u, edge_v, counts;
+    for (const auto& [edge, count] : local_counts) {
+        edge_u.push_back(edge.first);
+        edge_v.push_back(edge.second);
+        counts.push_back(count);
+    }
+    int local_size = counts.size();
+    
+    // Gather all counts to root
+    std::vector<int> all_sizes(size);
+    MPI_Gather(&local_size, 1, MPI_INT, all_sizes.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
 
+    std::vector<int> displs(size, 0);
+    if (rank == 0) {
+        for (int i = 1; i < size; ++i)
+            displs[i] = displs[i-1] + all_sizes[i-1];
+    }
+
+    std::vector<int> all_edge_u, all_edge_v, all_counts;
+    if (rank == 0) {
+        all_edge_u.resize(displs.back() + all_sizes.back());
+        all_edge_v.resize(displs.back() + all_sizes.back());
+        all_counts.resize(displs.back() + all_sizes.back());
+    }
+    
+    MPI_Gatherv(edge_u.data(), local_size, MPI_INT, 
+               all_edge_u.data(), all_sizes.data(), displs.data(), MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Gatherv(edge_v.data(), local_size, MPI_INT, 
+               all_edge_v.data(), all_sizes.data(), displs.data(), MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Gatherv(counts.data(), local_size, MPI_INT, 
+               all_counts.data(), all_sizes.data(), displs.data(), MPI_INT, 0, MPI_COMM_WORLD);
 	
+	// Aggregate and print results on root
+    if (rank == 0) 
+    {
+        std::unordered_map<std::pair<int, int>, int, PairHash> global_counts;
+        for (size_t i = 0; i < all_edge_u.size(); ++i) {
+            global_counts[{all_edge_u[i], all_edge_v[i]}] += all_counts[i];
+        }
+
+        std::cout << "\nEdge Butterfly Counts:\n";
+        size_t printed = 0;
+        for (const auto& [edge, count] : global_counts) {
+            if (printed++ < 5) { // Print first 5
+                std::cout << "Edge (" << edge.first << ", " << edge.second 
+                          << "): " << count << " butterflies\n";
+            }
+        }
+        std::cout << "Total edges with butterflies: " << global_counts.size() << "\n";
+    }
+	
+	  int global_min_count;
+int iteration = 0;
+do {
+    // Find local minimum count
+    int local_min = INT_MAX;
+    for (const auto& [edge, count] : g.getEdgeCounts()) {
+        if (count < local_min) local_min = count;
+    }
+    
+    // Find global minimum
+    MPI_Allreduce(&local_min, &global_min_count, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+    if (global_min_count == INT_MAX) break;
+
+    // Get edges to peel
+    auto local_peeled = g.get_edges_to_peel(global_min_count);
+    
+    // --- Gather all peeled edges ---
+    // Flatten local peeled edges into send buffer [u1, v1, u2, v2, ...]
+    std::vector<int> local_peeled_flat;
+    for (const auto& [u, v] : local_peeled) {
+        local_peeled_flat.push_back(u);
+        local_peeled_flat.push_back(v);
+    }
+    int local_peeled_size = local_peeled_flat.size();
+
+    // Gather sizes from all processes
+    std::vector<int> recv_counts(size, 0);
+    MPI_Gather(&local_peeled_size, 1, MPI_INT, 
+              recv_counts.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // Calculate displacements and total size
+    std::vector<int> displs(size, 0);
+    int total_peeled = 0;
+    if (rank == 0) {
+        for (int i = 1; i < size; ++i) {
+            displs[i] = displs[i-1] + recv_counts[i-1];
+        }
+        total_peeled = displs.back() + recv_counts.back();
+    }
+
+    // Gather all peeled edges to root
+    std::vector<int> global_peeled_flat(total_peeled);
+    MPI_Gatherv(local_peeled_flat.data(), local_peeled_size, MPI_INT,
+               global_peeled_flat.data(), recv_counts.data(), displs.data(), MPI_INT,
+               0, MPI_COMM_WORLD);
+
+    // Process and broadcast unique edges
+    std::vector<std::pair<int, int>> global_peeled;
+    if (rank == 0) {
+        // Deduplicate edges
+        std::set<std::pair<int, int>> unique_edges;
+        for (size_t i = 0; i < global_peeled_flat.size(); i += 2) {
+            unique_edges.insert({global_peeled_flat[i], global_peeled_flat[i+1]});
+        }
+        global_peeled.assign(unique_edges.begin(), unique_edges.end());
+
+        // Print peeling info
+        std::cout << "\n--- Peeling Iteration " << ++iteration << " ---"
+                  << "\nGlobal Minimum Butterfly Count: " << global_min_count
+                  << "\nNumber of Edges to Peel: " << global_peeled.size()
+                  << "\nFirst 5 edges: ";
+        for (size_t i = 0; i < 5 && i < global_peeled.size(); ++i) {
+            std::cout << "(" << global_peeled[i].first << "," 
+                      << global_peeled[i].second << ") ";
+        }
+        std::cout << std::endl;
+    }
+
+    // Broadcast the global peeled edges to all processes
+    int global_peeled_size = 0;
+    if (rank == 0) global_peeled_size = global_peeled.size();
+    MPI_Bcast(&global_peeled_size, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+    std::vector<int> broadcast_buffer(global_peeled_size * 2);
+    if (rank == 0) {
+        for (size_t i = 0; i < global_peeled.size(); ++i) {
+            broadcast_buffer[2*i] = global_peeled[i].first;
+            broadcast_buffer[2*i+1] = global_peeled[i].second;
+        }
+    }
+    MPI_Bcast(broadcast_buffer.data(), global_peeled_size*2, MPI_INT, 0, MPI_COMM_WORLD);
+
+    // Convert back to vector of pairs
+    std::vector<std::pair<int, int>> final_peeled;
+    for (int i = 0; i < global_peeled_size; ++i) {
+        final_peeled.emplace_back(
+            broadcast_buffer[2*i], 
+            broadcast_buffer[2*i+1]
+        );
+    }
+
+    // Update local graph with globally peeled edges
+    g.update_after_peeling(final_peeled);
+
+    // Optional: Print local state
+    std::cout << "Process " << rank << " remaining edges: " 
+              << g.getEdgeCounts().size() << std::endl;
+
+} while (global_min_count != INT_MAX);
     MPI_Finalize();
     return 0;
 }
+	
+
+
 

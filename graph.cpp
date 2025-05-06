@@ -5,6 +5,127 @@
 #include <unordered_map>
 
 
+#include <climits>
+
+
+void Graph::initialize_edge_counts() {
+    edge_counts = count_edges();
+    active_edges.clear();
+    for (const auto& [edge, _] : edge_counts) {
+        active_edges.insert(edge);
+    }
+}
+
+std::vector<std::pair<int, int>> Graph::get_edges_to_peel(int current_min) const {
+    std::vector<std::pair<int, int>> to_peel;
+    for (const auto& [edge, count] : edge_counts) {
+        if (count == current_min && active_edges.count(edge)) {
+            to_peel.push_back(edge);
+        }
+    }
+    return to_peel;
+}
+
+void Graph::adjust_counts(const std::vector<std::pair<int, int>>& peeled_edges) {
+    // Temporary storage for affected edges
+    std::unordered_map<std::pair<int, int>, int, PairHash> delta;
+
+    #pragma omp parallel for
+    for (size_t i = 0; i < peeled_edges.size(); ++i) {
+        const auto& [u1, v1] = peeled_edges[i];
+        
+        // Find u1's neighbors (v1's partition)
+        auto u1_it = std::find(local_vertex_ids.begin(), local_vertex_ids.end(), u1);
+        if (u1_it == local_vertex_ids.end()) continue;
+        size_t u1_idx = u1_it - local_vertex_ids.begin();
+        const auto& u1_neighbors = adjacency_list[u1_idx];
+
+        // Find all u2 in N(v1) \ {u1}
+        for (int u2 : u1_neighbors) {
+            if (u2 == v1) continue;
+            
+            // Find u2's neighbors
+            auto u2_it = std::find(local_vertex_ids.begin(), local_vertex_ids.end(), u2);
+            if (u2_it == local_vertex_ids.end()) continue;
+            size_t u2_idx = u2_it - local_vertex_ids.begin();
+            const auto& u2_neighbors = adjacency_list[u2_idx];
+            
+            // Compute intersection of N(u1) and N(u2)
+            std::vector<int> intersection;
+            std::set_intersection(u1_neighbors.begin(), u1_neighbors.end(),
+                                  u2_neighbors.begin(), u2_neighbors.end(),
+                                  std::back_inserter(intersection));
+            
+            // Update counts for affected edges
+            for (int v2 : intersection) {
+                if (v2 == v1) continue;
+                #pragma omp critical
+                {
+                    delta[{u1, v2}]--;
+                    delta[{u2, v1}]--;
+                    delta[{u2, v2}]--;
+                }
+            }
+        }
+    }
+
+    // Apply delta to edge_counts
+    for (const auto& [edge, change] : delta) {
+        if (edge_counts.find(edge) != edge_counts.end()) {
+            edge_counts[edge] += change;
+            if (edge_counts[edge] <= 0) {
+                active_edges.erase(edge);
+                edge_counts.erase(edge);
+            }
+        }
+    }
+}
+
+void Graph::update_after_peeling(const std::vector<std::pair<int, int>>& peeled_edges) {
+    for (const auto& edge : peeled_edges) {
+        active_edges.erase(edge);
+        edge_counts.erase(edge);
+    }
+    adjust_counts(peeled_edges);
+}
+
+std::unordered_map<std::pair<int,int>,int,PairHash> Graph::count_edges() const {
+    // Step A: Enumerate all wedges in this partition
+    auto wedges = get_wedges();
+
+    // Step B: Group wedges by the *original* edge (u,v)
+    // We only count butterflies on edges that actually appear in adjacency_list.
+    std::unordered_map<std::pair<int,int>, std::vector<int>, PairHash> edge_to_ws;
+    for (auto &w : wedges) {
+        int u, w_rank, v;
+        std::tie(u, w_rank, v) = w;
+        // the two *original* edges in that wedge are (u,v) and (w,v)
+        // here we only collect for (u,v):
+        auto e = std::minmax(u, v);
+        // record the endpoint w for edge (e.first, e.second)
+        edge_to_ws[e].push_back(w_rank);
+    }
+
+    // Step C: For each original edge, compute #butterflies = C(d,2)
+    // where d = number of distinct w's for that edge.
+    std::unordered_map<std::pair<int,int>,int,PairHash> edge_counts;
+    for (auto &kv : edge_to_ws) {
+        auto edge = kv.first;
+        auto &vec_w = kv.second;
+
+        // remove duplicates if any
+        std::sort(vec_w.begin(), vec_w.end());
+        vec_w.erase(std::unique(vec_w.begin(), vec_w.end()), vec_w.end());
+
+        int d = static_cast<int>(vec_w.size());
+        // each pair of distinct w's forms one butterfly on this edge
+        edge_counts[edge] = d * (d - 1) / 2;
+    }
+
+    return edge_counts;
+}
+
+
 std::vector<Wedge> Graph::get_wedges() const {
     std::vector<Wedge> local_wedges;
     
@@ -43,7 +164,8 @@ std::vector<Wedge> Graph::get_wedges() const {
         }
         
         #pragma omp critical
-        local_wedges.insert(local_wedges.end(), private_wedges.begin(), private_wedges.end());
+        local_wedges.insert(local_wedges.end(), 
+private_wedges.begin(), private_wedges.end());
     }
     
     return local_wedges;
