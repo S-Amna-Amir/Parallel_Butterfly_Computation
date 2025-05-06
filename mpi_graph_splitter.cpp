@@ -20,6 +20,11 @@ Step 6: (Optionally) deletes them later based on user input
 #include <string>
 #include <cstdio>
 
+/*void wrapper(rank)
+{
+
+}*/
+
 int main(int argc, char** argv) 
 {
     MPI_Init(&argc, &argv);
