@@ -5,6 +5,51 @@
 #include <unordered_map>
 
 
+std::vector<Wedge> Graph::get_wedges() const {
+    std::vector<Wedge> local_wedges;
+    
+    #pragma omp parallel
+    {
+        std::vector<Wedge> private_wedges;
+        
+        #pragma omp for schedule(dynamic, 16)
+        for (size_t u_idx = 0; u_idx < local_vertex_ids.size(); ++u_idx) 
+        {
+            const int u_rank = local_vertex_ids[u_idx];
+            const auto& u_neighbors = adjacency_list[u_idx];
+            
+            // iterates over all neighbors of u, because any of them could be a center
+            for (int v_rank : u_neighbors) 
+            {
+                // Find if v, a neighbor, exists in our local partition
+                auto v_it = std::lower_bound(local_vertex_ids.begin(),local_vertex_ids.end(),v_rank);
+                
+                if (v_it == local_vertex_ids.end() || *v_it != v_rank) continue;	//it doesnt exist here
+                
+                const size_t v_idx = std::distance(local_vertex_ids.begin(), v_it);	//calculates index of v
+                const auto& v_neighbors = adjacency_list[v_idx];					//takes neighbours of v
+                
+                // Find valid endpoints w where w_rank > u_rank
+                auto w_start = v_neighbors.begin();
+                auto w_end = std::upper_bound(v_neighbors.begin(), v_neighbors.end(), u_rank, std::greater<int>()); // greater for comparison
+                
+                for (auto w_it = w_start; w_it != w_end; ++w_it) 
+                {
+                    if (*w_it != u_rank) {  // Avoid self-wedges
+                        private_wedges.emplace_back(u_rank, *w_it, v_rank);
+                    }
+                }
+            }
+        }
+        
+        #pragma omp critical
+        local_wedges.insert(local_wedges.end(), private_wedges.begin(), private_wedges.end());
+    }
+    
+    return local_wedges;
+}
+
+
 // Load partition data into the Graph object
 void Graph::loadPartition(const std::vector<idx_t>& metis_local_vertices, const std::vector<std::vector<idx_t>>& global_adj) {
     // Clear existing data

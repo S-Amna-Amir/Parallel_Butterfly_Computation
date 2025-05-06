@@ -203,6 +203,21 @@ idx_t n = 0;
                       << " modified degree: " << deg_u[i] << "\n";
         }
     }
+    
+    
+	 auto wedges = g.get_wedges();
+
+	std::cout << "Process " << rank << " found " << wedges.size() 
+              << " wedges\n";
+    if (!wedges.empty()) {
+        const auto& [u, w, v] = wedges[0];
+        std::cout << "Sample wedge: (" << u << ", " << w << ", " << v << ")\n";
+    }
+
+	
+	
+
+	
     MPI_Finalize();
     return 0;
 }

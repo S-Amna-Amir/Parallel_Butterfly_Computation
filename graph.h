@@ -4,6 +4,10 @@
 #include <vector>
 #include <unordered_map>
 #include <metis.h>  // For idx_t
+#include <tuple>
+
+// A wedge is represented as (endpoint1, endpoint2, center)
+using Wedge = std::tuple<int, int, int>;
 
 class Graph {
 private:
@@ -16,6 +20,7 @@ public:
     void loadPartition(const std::vector<idx_t>& local_vertices, const std::vector<std::vector<idx_t>>& global_adj);
 
     void preprocess();
+    std::vector<Wedge> get_wedges() const;
     
     // Getters
     const std::vector<int>& getLocalVertexIDs() const { return local_vertex_ids; }
