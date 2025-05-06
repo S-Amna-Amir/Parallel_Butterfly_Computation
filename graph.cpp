@@ -1,167 +1,129 @@
-// graph.cpp
 #include "graph.h"
-#include <fstream>
-#include <unordered_map>
-#include <algorithm>
-
-Graph::Graph(const std::string& filename) 
-{
-    std::ifstream file(filename);
-    int u, v;
-    std::vector<std::pair<int, int>> edges;
-
-    while (file >> u >> v) //read edges
-    {
-        edges.emplace_back(u, v);
-    }
-
-    //find max vertex to determine partitions
-    int max_u = 0, max_v = 0;
-    for (const auto& [u, v] : edges) 
-    {
-        max_u = std::max(max_u, u);
-        max_v = std::max(max_v, v);
-    }
-    num_vertices_U = max_u + 1;
-
-    //build csr for U->V and V->U
-    //why csr? memory efficiency, cache-friendly access, and parallelization ready :D
-    //example: for a graph with 1M vertices but only 5M edges:
-	//adjacency matrix: 1M × 1M = 1 trillion entries (mostly zeros)
-	//csr: just stores ~5M edges 
-	//Format	Memory	 Neighbor Access   Parallel Safe
-	//CSR           Best	 O(1)	           Yes
-	//Adj. List	High	 Pointer chasing   Maybe
-	//Adj. Matrix	Huge	 O(1)	           Yes
-    auto build_csr = [](const auto& edges, auto& offsets, auto& adj, bool swap_uv) 
-    {
-        std::unordered_map<int, std::vector<int>> edge_map;
-        for (const auto& [u, v] : edges) 
-        {
-            int src = swap_uv ? v : u;
-            int dst = swap_uv ? u : v;
-            edge_map[src].push_back(dst);
-        }
-
-        offsets.resize(edge_map.size() + 1);
-        offsets[0] = 0;
-        for (int i = 0; i < edge_map.size(); ++i) 
-        {
-            offsets[i+1] = offsets[i] + edge_map[i].size();
-            adj.insert(adj.end(), edge_map[i].begin(), edge_map[i].end());
-        }
-    };
-
-    build_csr(edges, offsets_U, edges_U, false); //U->V
-    build_csr(edges, offsets_V, edges_V, true); //V->U
-}
-
-// ------------------- Graph Methods -------------------
-const int* Graph::neighbors(int vertex) const 
-{
-    return is_vertex_in_U(vertex) ? 
-        &edges_U[offsets_U[vertex]] : 
-        &edges_V[offsets_V[vertex - num_vertices_U]];
-}
-
-int Graph::degree(int vertex) const 
-{
-    return is_vertex_in_U(vertex) ? offsets_U[vertex+1] - offsets_U[vertex] : offsets_V[vertex - num_vertices_U + 1] - offsets_V[vertex - num_vertices_U];
-}
-
-bool Graph::is_vertex_in_U(int vertex) const 
-{
-    return vertex < num_vertices_U;
-}
-
-int Graph::count_common_neighbors(int u, int w) const 
-{
-    const int* nu = neighbors(u);
-    const int* nw = neighbors(w);
-    int i = 0, j = 0, count = 0;
-    int du = degree(u), dw = degree(w);
-
-    while (i < du && j < dw) 
-    {
-        if (nu[i] == nw[j]) 
-        { 
-        	count++; i++; j++; 
-        }
-        else if (nu[i] < nw[j])
-        {
-        	i++;
-        }
-        else 
-        {
-        	j++;
-    	}
-    }
-    return count;
-}
-
-int Graph::num_vertices() const 
-{ 
-    return num_vertices_U + (offsets_V.size() - 1); 
-}
-
-int Graph::num_edges() const 
-{ 
-    return edges_U.size(); 
-}
-
-
-
-
-
 #include <mpi.h>
+#include <algorithm>
+#include <vector>
+#include <unordered_map>
 
-void Graph::broadcast(int root_rank) {
-    int rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    // Broadcast basic metadata first
-    MPI_Bcast(&num_vertices_U, 1, MPI_INT, root_rank, MPI_COMM_WORLD);
+// Load partition data into the Graph object
+void Graph::loadPartition(const std::vector<idx_t>& metis_local_vertices, const std::vector<std::vector<idx_t>>& global_adj) {
+    // Clear existing data
+    local_vertex_ids.clear();
+    adjacency_list.clear();
 
-    // Broadcast U->V CSR data
-    if (rank != root_rank) {
-        // On receiving processes, resize vectors to receive data
-        offsets_U.resize(num_vertices_U + 1);
+    // Convert METIS idx_t to int and populate local vertices
+    for (idx_t global_id : metis_local_vertices) {
+        local_vertex_ids.push_back(static_cast<int>(global_id));
     }
-    MPI_Bcast(offsets_U.data(), offsets_U.size(), MPI_INT, root_rank, MPI_COMM_WORLD);
 
-    // Broadcast edges_U size first
-    int edges_U_size;
-    if (rank == root_rank) {
-        edges_U_size = edges_U.size();
+    // Build adjacency list with global vertex IDs
+    for (int local_idx = 0; local_idx < local_vertex_ids.size(); ++local_idx) {
+        int global_id = local_vertex_ids[local_idx];
+        std::vector<int> neighbors;
+        for (idx_t neighbor : global_adj[global_id]) {
+            neighbors.push_back(static_cast<int>(neighbor));
+        }
+        adjacency_list.push_back(neighbors);
     }
-    MPI_Bcast(&edges_U_size, 1, MPI_INT, root_rank, MPI_COMM_WORLD);
+}
 
-    if (rank != root_rank) {
-        edges_U.resize(edges_U_size);
-    }
-    MPI_Bcast(edges_U.data(), edges_U_size, MPI_INT, root_rank, MPI_COMM_WORLD);
 
-    // Broadcast V->U CSR data
-    int offsets_V_size;
-    if (rank == root_rank) {
-        offsets_V_size = offsets_V.size();
-    }
-    MPI_Bcast(&offsets_V_size, 1, MPI_INT, root_rank, MPI_COMM_WORLD);
 
-    if (rank != root_rank) {
-        offsets_V.resize(offsets_V_size);
-    }
-    MPI_Bcast(offsets_V.data(), offsets_V_size, MPI_INT, root_rank, MPI_COMM_WORLD);
+void Graph::preprocess() 
+{
+    int world_rank, world_size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
-    // Broadcast edges_V size
-    int edges_V_size;
-    if (rank == root_rank) {
-        edges_V_size = edges_V.size();
+    // Step 1: Compute local degrees
+    int local_vertex_count = local_vertex_ids.size();
+    std::vector<int> local_degrees(local_vertex_count);
+    for (int i = 0; i < local_vertex_count; ++i) 
+    {
+        local_degrees[i] = adjacency_list[i].size();
     }
-    MPI_Bcast(&edges_V_size, 1, MPI_INT, root_rank, MPI_COMM_WORLD);
 
-    if (rank != root_rank) {
-        edges_V.resize(edges_V_size);
+    // Step 2: Prepare send buffer (vertex ID, degree pairs)
+    std::vector<int> send_buffer;
+    send_buffer.reserve(2 * local_vertex_count);
+    for (int i = 0; i < local_vertex_count; ++i) 
+    {
+        send_buffer.push_back(local_vertex_ids[i]);
+        send_buffer.push_back(local_degrees[i]);
     }
-    MPI_Bcast(edges_V.data(), edges_V_size, MPI_INT, root_rank, MPI_COMM_WORLD);
+
+    // Step 3: Gather send counts from all processes
+    std::vector<int> recv_counts(world_size);
+    int send_count = send_buffer.size();
+    MPI_Allgather(&send_count, 1, MPI_INT, recv_counts.data(), 1, MPI_INT, MPI_COMM_WORLD);
+
+    // Step 4: Compute displacements for MPI_Allgatherv
+    std::vector<int> displacements(world_size, 0);
+    for (int i = 1; i < world_size; ++i) 
+    {
+        displacements[i] = displacements[i-1] + recv_counts[i-1];
+    }
+
+    // Step 5: Allgatherv to gather all vertex-degree pairs
+    int total_recv_count = displacements.back() + recv_counts.back();
+    std::vector<int> recv_buffer(total_recv_count);
+    MPI_Allgatherv(send_buffer.data(), send_count, MPI_INT,
+                   recv_buffer.data(), recv_counts.data(), displacements.data(),
+                   MPI_INT, MPI_COMM_WORLD);
+
+    // Step 6: Parse into global_vertex_degrees
+    std::vector<std::pair<int, int>> global_vertex_degrees;
+    for (size_t i = 0; i < recv_buffer.size(); i += 2) 
+    {
+        int id = recv_buffer[i];
+        int degree = recv_buffer[i+1];
+        global_vertex_degrees.emplace_back(id, degree);
+    }
+
+    // Step 7: Sort by degree (descending) and vertex ID (ascending for ties)
+    std::sort(global_vertex_degrees.begin(), global_vertex_degrees.end(),
+          [](const std::pair<int,int>& a,
+             const std::pair<int,int>& b) -> bool
+          {
+              // If degrees equal, tie-break on vertex ID ascending:
+              if (a.second == b.second)
+                  return a.first < b.first;
+              // Otherwise sort by descending degree:
+              return a.second > b.second;
+          });
+
+
+    // Step 8: Create global vertex ID to rank map
+    std::unordered_map<int, int> vertex_id_to_rank;
+    for (size_t i = 0; i < global_vertex_degrees.size(); ++i) 
+    {
+        vertex_id_to_rank[global_vertex_degrees[i].first] = i;
+    }
+
+    // Step 9: Rename local vertex IDs to their global ranks
+    for (int i = 0; i < local_vertex_count; ++i) 
+    {
+        local_vertex_ids[i] = vertex_id_to_rank[local_vertex_ids[i]];
+    }
+
+    // Step 10: Rename neighbors in adjacency lists and sort them
+    #pragma omp parallel for
+    for (size_t i = 0; i < adjacency_list.size(); ++i) 
+    {
+        auto& neighbors = adjacency_list[i];
+        for (auto& neighbor : neighbors) {
+            neighbor = vertex_id_to_rank[neighbor];
+        }
+        std::sort(neighbors.begin(), neighbors.end(), std::greater<int>());
+    }
+
+    // Step 11: Compute deg_u for each local vertex
+    deg_u.resize(local_vertex_count);
+    #pragma omp parallel for
+    for (size_t i = 0; i < adjacency_list.size(); ++i) {
+        int u_rank = local_vertex_ids[i];
+        auto& neighbors = adjacency_list[i];
+        auto it = std::upper_bound(neighbors.begin(), neighbors.end(), u_rank, std::greater<int>());
+        deg_u[i] = std::distance(neighbors.begin(), it);
+    }
 }

@@ -1,28 +1,26 @@
-// graph.h
+#ifndef GRAPH_H
+#define GRAPH_H
+
 #include <vector>
-#include <string>
+#include <unordered_map>
+#include <metis.h>  // For idx_t
 
-class Graph 
-{
-	private:
-	    std::vector<int> offsets_U, edges_U;  // CSR for U->V
-	    std::vector<int> offsets_V, edges_V;  // CSR for V->U
-	    int num_vertices_U;
+class Graph {
+private:
+    std::vector<int> local_vertex_ids;       // Original global vertex IDs
+    std::vector<std::vector<int>> adjacency_list; // Adjacency list (global IDs)
+    std::vector<int> deg_u;                  // deg_u(u) for each local vertex
 
-	public:
-	    Graph() = default;
-	    Graph(const std::string& filename);
-	    
-	    // Accessors
-	    const int* neighbors(int vertex) const;
-	    int degree(int vertex) const;
-	    bool is_vertex_in_U(int vertex) const;
-	    int count_common_neighbors(int u, int w) const;
-	    
-	    // Stats
-	    int num_vertices() const;
-	    int num_edges() const;
-	    
-	    //mpi broadcast
-	    void broadcast(int root_rank); 
+public:
+    // Load partition from METIS results (in-memory)
+    void loadPartition(const std::vector<idx_t>& local_vertices, const std::vector<std::vector<idx_t>>& global_adj);
+
+    void preprocess();
+    
+    // Getters
+    const std::vector<int>& getLocalVertexIDs() const { return local_vertex_ids; }
+    const std::vector<std::vector<int>>& getAdjacencyList() const { return adjacency_list; }
+    const std::vector<int>& getDegU() const { return deg_u; }
 };
+
+#endif

@@ -5,7 +5,9 @@
 #include <string>
 #include <metis.h>
 #include <mpi.h>
-#include <utility>
+#include <utility>  // For pair
+#include "graph.h"
+
 using namespace std;
 
 int main(int argc, char *argv[]) 
@@ -162,9 +164,8 @@ idx_t n = 0;
 
     cout << "Process " << rank << " has " << local_vertices.size()
          << " vertices:" << endl;
-         cout.flush();
     for (int local_v : local_vertices) {
-        cout << "Process " << rank << "  " << id_to_vertex[local_v] << " connects to: ";
+        cout << "Process " << rank <<":  " << id_to_vertex[local_v] << " connects to: ";
         for (idx_t neighbor : adj[local_v]) {
             cout << id_to_vertex[neighbor] << " ";
         }
@@ -181,6 +182,27 @@ idx_t n = 0;
         }
     }
 
+	Graph g;
+	g.loadPartition(local_vertices, adj); 
+	g.preprocess();
+	
+    if (rank == 0) {
+        std::cout << "\nPreprocessing complete. Sample local vertex degrees:\n";
+        const auto& deg_u = g.getDegU();
+        for (size_t i = 0; i < 5 && i < deg_u.size(); ++i) {
+            std::cout << "Vertex " << g.getLocalVertexIDs()[i] 
+                      << " modified degree: " << deg_u[i] << "\n";
+        }
+    }
+    else
+    {
+    	std::cout << "\nPreprocessing complete. Sample local vertex degrees:\n";
+        const auto& deg_u = g.getDegU();
+        for (size_t i = 0; i < 5 && i < deg_u.size(); ++i) {
+            std::cout << "Vertex " << g.getLocalVertexIDs()[i] 
+                      << " modified degree: " << deg_u[i] << "\n";
+        }
+    }
     MPI_Finalize();
     return 0;
 }
