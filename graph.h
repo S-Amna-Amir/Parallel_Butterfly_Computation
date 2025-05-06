@@ -10,6 +10,7 @@ class Graph
 	    int num_vertices_U;
 
 	public:
+	    Graph() = default;
 	    Graph(const std::string& filename);
 	    
 	    // Accessors
@@ -21,4 +22,7 @@ class Graph
 	    // Stats
 	    int num_vertices() const;
 	    int num_edges() const;
+	    
+	    //mpi broadcast
+	    void broadcast(int root_rank); 
 };

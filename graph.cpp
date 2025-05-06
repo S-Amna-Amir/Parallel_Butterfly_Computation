@@ -108,3 +108,60 @@ int Graph::num_edges() const
 { 
     return edges_U.size(); 
 }
+
+
+
+
+
+#include <mpi.h>
+
+void Graph::broadcast(int root_rank) {
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    // Broadcast basic metadata first
+    MPI_Bcast(&num_vertices_U, 1, MPI_INT, root_rank, MPI_COMM_WORLD);
+
+    // Broadcast U->V CSR data
+    if (rank != root_rank) {
+        // On receiving processes, resize vectors to receive data
+        offsets_U.resize(num_vertices_U + 1);
+    }
+    MPI_Bcast(offsets_U.data(), offsets_U.size(), MPI_INT, root_rank, MPI_COMM_WORLD);
+
+    // Broadcast edges_U size first
+    int edges_U_size;
+    if (rank == root_rank) {
+        edges_U_size = edges_U.size();
+    }
+    MPI_Bcast(&edges_U_size, 1, MPI_INT, root_rank, MPI_COMM_WORLD);
+
+    if (rank != root_rank) {
+        edges_U.resize(edges_U_size);
+    }
+    MPI_Bcast(edges_U.data(), edges_U_size, MPI_INT, root_rank, MPI_COMM_WORLD);
+
+    // Broadcast V->U CSR data
+    int offsets_V_size;
+    if (rank == root_rank) {
+        offsets_V_size = offsets_V.size();
+    }
+    MPI_Bcast(&offsets_V_size, 1, MPI_INT, root_rank, MPI_COMM_WORLD);
+
+    if (rank != root_rank) {
+        offsets_V.resize(offsets_V_size);
+    }
+    MPI_Bcast(offsets_V.data(), offsets_V_size, MPI_INT, root_rank, MPI_COMM_WORLD);
+
+    // Broadcast edges_V size
+    int edges_V_size;
+    if (rank == root_rank) {
+        edges_V_size = edges_V.size();
+    }
+    MPI_Bcast(&edges_V_size, 1, MPI_INT, root_rank, MPI_COMM_WORLD);
+
+    if (rank != root_rank) {
+        edges_V.resize(edges_V_size);
+    }
+    MPI_Bcast(edges_V.data(), edges_V_size, MPI_INT, root_rank, MPI_COMM_WORLD);
+}
