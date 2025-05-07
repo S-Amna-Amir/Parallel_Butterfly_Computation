@@ -204,7 +204,7 @@ int main(int argc, char *argv[]) {
     for (const auto& [int_id, count] : butterfly_counts1) {
         // Only output if count > 0
         if (count > 0) {
-            std::cout << "Process " << rank << ": Vertex (new rank) "
+            std::cout << "Process " << rank << ": Vertex (rank) "
                       << id_to_vertex[int_id] << " is part of "
                       << count << " butterflies\n";
         }
@@ -213,7 +213,7 @@ int main(int argc, char *argv[]) {
 	auto butterfly_counts2 = g.count_butterflies_vertex();
 	auto peel_order = g.peel_vertices_by_butterfly_count(butterfly_counts2);
 
-	std::cout << "\n\nProcess " << rank << ": Vertex peeling order based on butterfly participation: ";
+	std::cout << "\n\nProcess " << rank << ": Vertex (rank) peeling order based on butterfly participation: ";
 	for (int v : peel_order) {
 	    std::cout << v << " ";
 }
