@@ -5,6 +5,30 @@
 #include <unordered_map>
 #include <unordered_set>
 
+std::vector<int> Graph::peel_vertices_by_butterfly_count(const std::unordered_map<int, int>& butterfly_counts) const {
+    std::unordered_map<int, int> counts = butterfly_counts;
+    std::unordered_set<int> removed;
+    std::vector<int> peel_order;
+
+    while (!counts.empty()) {
+        // Find vertex with minimum count
+        auto min_it = std::min_element(
+            counts.begin(), counts.end(),
+            [](const auto& a, const auto& b) {
+                return a.second < b.second;
+            });
+
+        int v = min_it->first;
+        peel_order.push_back(v);
+        removed.insert(v);
+        counts.erase(v);
+        
+        // NOTE: If doing dynamic peeling, you'd recompute butterfly_counts here.
+    }
+
+    return peel_order;
+}
+
 //==========================================================================
 
 std::unordered_map<int, int> Graph::count_butterflies_vertex() const {

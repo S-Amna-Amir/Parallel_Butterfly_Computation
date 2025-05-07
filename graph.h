@@ -36,6 +36,8 @@ public:
     
     
     std::unordered_map<int, int> count_butterflies_vertex() const;
+    std::vector<int> peel_vertices_by_butterfly_count(const std::unordered_map<int, int>&) const;
+
 };
 
 #endif
