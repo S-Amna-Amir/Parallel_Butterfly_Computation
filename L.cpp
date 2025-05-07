@@ -212,12 +212,30 @@ int main(int argc, char *argv[]) {
 
 	auto peel_order = g.peel_vertices_by_butterfly_count(butterfly_counts);
 
-	std::cout << "\n\nProcess " << rank << ": Vertex (rank) peeling order based on butterfly participation: ";
-	for (int v : peel_order) {
-	    std::cout << v << " ";
-}
-std::cout << std::endl;
+		std::cout << "\n\nProcess " << rank << ": Vertex (rank) peeling order based on butterfly participation: ";
+		for (int v : peel_order) {
+			std::cout << v << " ";
+	}
+	std::cout << std::endl;
 
+	//------------------------------------
+	
+	    // ... [previous code remains unchanged]
+
+    auto butterfly_edges = g.count_butterflies_edge();
+
+    // Process and print EDGE results
+    for (const auto& [edge_pair, count] : butterfly_edges) {
+        if (count > 0) {
+            // Get original vertex names from global ranks
+            std::string u_name = id_to_vertex[edge_pair.first];
+            std::string v_name = id_to_vertex[edge_pair.second];
+            
+            std::cout << "Process " << rank << ": Edge (" 
+                      << u_name << " - " << v_name << ") is part of "
+                      << count << " butterflies\n";
+        }
+    }
 
 
 
