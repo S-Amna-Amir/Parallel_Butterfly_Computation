@@ -5,12 +5,14 @@
 #include <unordered_map>
 #include <unordered_set>
 
-std::vector<int> Graph::peel_vertices_by_butterfly_count(const std::unordered_map<int, int>& butterfly_counts) const {
+std::vector<int> Graph::peel_vertices_by_butterfly_count(const std::unordered_map<int, int>& butterfly_counts) const 
+{
     std::unordered_map<int, int> counts = butterfly_counts;
     std::unordered_set<int> removed;
     std::vector<int> peel_order;
 
-    while (!counts.empty()) {
+    while (!counts.empty()) 
+    {
         // Find vertex with minimum count
         auto min_it = std::min_element(
             counts.begin(), counts.end(),
@@ -31,73 +33,99 @@ std::vector<int> Graph::peel_vertices_by_butterfly_count(const std::unordered_ma
 
 //==========================================================================
 
-std::unordered_map<int, int> Graph::count_butterflies_vertex() const {
+std::unordered_map<int, int> Graph::count_butterflies_vertex() const 
+{
     std::unordered_map<int, int> butterfly_counts;
     std::unordered_map<int, std::unordered_set<int>> adj_map;
 
-    // Build adjacency map including all vertices (not just locals)
-    for (size_t i = 0; i < local_vertex_ids.size(); ++i) {
+    // Build adjacency map
+    for (size_t i = 0; i < local_vertex_ids.size(); ++i) 
+    {
         int u = local_vertex_ids[i];
-        for (int v : adjacency_list[i]) {
+        for (int v : adjacency_list[i]) 
+        {
             adj_map[u].insert(v);
-            adj_map[v].insert(u); // Ensure bidirectionality
+            adj_map[v].insert(u);
         }
     }
 
-    // Get all wedges from local partition
     auto wedges = get_wedges();
 
-    // Count butterflies
-    for (const auto& wedge : wedges) {
-        int u = wedge.u;
-        int v = wedge.v;
-        int w = wedge.w;
+    #pragma omp parallel
+    {
+        std::unordered_map<int, int> local_counts;
+        #pragma omp for nowait
+        for (size_t i = 0; i < wedges.size(); ++i) 
+        {
+            const auto& wedge = wedges[i];
+            int u = wedge.u;
+            int v = wedge.v;
+            int w = wedge.w;
 
-        // Look for a common neighbor x connected to both v and w, x != u
-        for (int x : adj_map[v]) {
-            if (x != u && adj_map[w].count(x)) {
-                // (u, v, w, x) is a butterfly
-                butterfly_counts[u]++;
-                butterfly_counts[v]++;
-                butterfly_counts[w]++;
-                butterfly_counts[x]++;
+            const auto& v_neighbors = adj_map.at(v);
+            const auto& w_neighbors = adj_map.at(w);
+
+            for (int x : v_neighbors) 
+            {
+                if (x != u && w_neighbors.count(x)) 
+                {
+                    local_counts[u]++;
+                    local_counts[v]++;
+                    local_counts[w]++;
+                    local_counts[x]++;
+                }
             }
+        }
+
+        #pragma omp critical
+        for (const auto& [vertex, count] : local_counts) 
+        {
+            butterfly_counts[vertex] += count;
         }
     }
 
-    // Divide counts by 4 to account for 4 appearances per butterfly
-    for (auto& [vertex, count] : butterfly_counts) {
+    // Adjust counts
+    for (auto& [vertex, count] : butterfly_counts) 
+    {
         count /= 4;
     }
 
     return butterfly_counts;
 }
 
-std::vector<Wedge> Graph::get_wedges() const {
+std::vector<Wedge> Graph::get_wedges() const 
+{
     std::vector<Wedge> wedges;
 
-    for (size_t i = 0; i < local_vertex_ids.size(); ++i) {
-        int u = local_vertex_ids[i];
-        const auto& neighbors = adjacency_list[i];
+    #pragma omp parallel
+    {
+        std::vector<Wedge> local_wedges;
+        #pragma omp for nowait
+        for (size_t i = 0; i < local_vertex_ids.size(); ++i) 
+        {
+            int u = local_vertex_ids[i];
+            const auto& neighbors = adjacency_list[i];
 
-        // Sort neighbors in ascending order
-        std::vector<int> sorted_neighbors = neighbors;
-        std::sort(sorted_neighbors.begin(), sorted_neighbors.end());
+            std::vector<int> sorted_neighbors(neighbors.begin(), neighbors.end());
+            std::sort(sorted_neighbors.begin(), sorted_neighbors.end());
 
-        for (size_t j = 0; j < sorted_neighbors.size(); ++j) {
-            int v = sorted_neighbors[j];
-            for (size_t k = j + 1; k < sorted_neighbors.size(); ++k) {
-                int w = sorted_neighbors[k];
-
-                // Only consider wedges u-v-w with v < w to avoid duplication
-                wedges.push_back({u, v, w});
+            for (size_t j = 0; j < sorted_neighbors.size(); ++j) 
+            {
+                int v = sorted_neighbors[j];
+                for (size_t k = j + 1; k < sorted_neighbors.size(); ++k) 
+                {
+                    int w = sorted_neighbors[k];
+                    local_wedges.emplace_back(u, v, w);
+                }
             }
         }
+
+        #pragma omp critical
+        wedges.insert(wedges.end(), local_wedges.begin(), local_wedges.end());
     }
 
     return wedges;
 }
-
 //==========================================================================
 
 // Load partition data into the Graph object
