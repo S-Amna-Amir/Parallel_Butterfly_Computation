@@ -198,10 +198,10 @@ int main(int argc, char *argv[]) {
 	// ---------------------- Butterfly Counting ----------------------
 
     // Call the reference butterfly counting function
-    auto butterfly_counts = g.count_butterflies_vertex();
+    auto butterfly_counts1 = g.count_butterflies_vertex();
 
     // Process and print the results
-    for (const auto& [int_id, count] : butterfly_counts) {
+    for (const auto& [int_id, count] : butterfly_counts1) {
         // Only output if count > 0
         if (count > 0) {
             std::cout << "Process " << rank << ": Vertex (new rank) "
@@ -210,6 +210,14 @@ int main(int argc, char *argv[]) {
         }
     }
 
+	auto butterfly_counts2 = g.count_butterflies_vertex();
+	auto peel_order = g.peel_vertices_by_butterfly_count(butterfly_counts2);
+
+	std::cout << "\n\nProcess " << rank << ": Vertex peeling order based on butterfly participation: ";
+	for (int v : peel_order) {
+	    std::cout << v << " ";
+}
+std::cout << std::endl;
 
 
 
