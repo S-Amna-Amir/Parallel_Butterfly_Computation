@@ -1,4 +1,3 @@
-
 #include "graph.h"
 #include <mpi.h>
 #include <algorithm>
@@ -6,8 +5,121 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <omp.h>
+#include <queue>
+#include <utility>
 
+std::vector<std::pair<int, int>> Graph::peel_edges_by_butterfly_count(
+    const std::unordered_map<std::pair<int, int>, int, PairHash>& edge_counts) const 
+{
+    // Copy counts and create mutable adjacency structure
+    std::unordered_map<std::pair<int, int>, int, PairHash> counts = edge_counts;
+    std::unordered_set<std::pair<int, int>, PairHash> removed_edges;
+    std::vector<std::pair<int, int>> peel_order;
 
+    // Create adjacency map with edge sets
+    std::unordered_map<int, std::unordered_set<int>> adj_map;
+    for (size_t i = 0; i < local_vertex_ids.size(); ++i) {
+        int u = local_vertex_ids[i];
+        adj_map[u] = std::unordered_set<int>(
+            adjacency_list[i].begin(), 
+            adjacency_list[i].end()
+        );
+    }
+
+    while (!counts.empty()) {
+        // Find edge with minimum butterfly count
+        auto min_it = std::min_element(
+            counts.begin(), counts.end(),
+            [](const auto& a, const auto& b) { return a.second < b.second; });
+        
+        auto edge = min_it->first;
+        peel_order.push_back(edge);
+        removed_edges.insert(edge);
+        counts.erase(edge);
+
+        // Remove edge from adjacency lists
+        #pragma omp parallel sections
+        {
+            #pragma omp section
+            {
+                if (adj_map[edge.first].count(edge.second)) {
+                    adj_map[edge.first].erase(edge.second);
+                }
+            }
+            #pragma omp section
+            {
+                if (adj_map[edge.second].count(edge.first)) {
+                    adj_map[edge.second].erase(edge.first);
+                }
+            }
+        }
+
+        // Find affected edges (edges in triangles/wedges with removed edge)
+        std::unordered_set<std::pair<int, int>, PairHash> affected;
+        #pragma omp parallel
+        {
+            std::unordered_set<std::pair<int, int>, PairHash> private_affected;
+            
+            // Check both endpoints of removed edge
+            #pragma omp for nowait
+            for (int endpoint : {edge.first, edge.second}) {
+                if (adj_map.find(endpoint) == adj_map.end()) continue;
+                
+                for (int neighbor : adj_map[endpoint]) {
+                    // Check edges connecting to neighbors
+                    auto e1 = OrderedPair(endpoint, neighbor);
+                    if (!removed_edges.count(e1)) {
+                        private_affected.insert(e1);
+                    }
+                    
+                    // Check edges between neighbors
+                    for (int second_neighbor : adj_map[neighbor]) {
+                        if (second_neighbor == endpoint) continue;
+                        auto e2 = OrderedPair(neighbor, second_neighbor);
+                        if (!removed_edges.count(e2)) {
+                            private_affected.insert(e2);
+                        }
+                    }
+                }
+            }
+            
+            #pragma omp critical
+            affected.insert(private_affected.begin(), private_affected.end());
+        }
+
+        // Recompute counts for affected edges
+        #pragma omp parallel for
+        for (size_t idx = 0; idx < affected.size(); ++idx) {
+            auto it = affected.begin();
+            std::advance(it, idx);
+            auto e = *it;
+            
+            if (removed_edges.count(e)) continue;
+            
+            // Simplified butterfly count for edge (u,v)
+            int count = 0;
+            int u = e.first, v = e.second;
+            
+            if (adj_map[u].size() > adj_map[v].size()) std::swap(u, v);
+            
+            for (int w : adj_map[u]) {
+                if (w == v) continue;
+                if (adj_map[v].count(w)) {
+                    count += (adj_map[u].size() - 1) * (adj_map[v].size() - 1);
+                }
+            }
+            
+            #pragma omp critical
+            {
+                if (counts.find(e) != counts.end()) {
+                    counts[e] = count;
+                }
+            }
+        }
+    }
+
+    return peel_order;
+}
 //==========================================================================
 // Algorithm 4: Parallel work-efficient butterfly counting per edge
 

@@ -198,7 +198,7 @@ int main(int argc, char *argv[]) {
 	// ---------------------- Butterfly Counting ----------------------
 
     // Call the reference butterfly counting function
-    auto butterfly_counts = g.count_butterflies_vertex();
+    auto butterfly_counts = g.count_butterflies_vertex(); //!!
 
     // Process and print the results
     for (const auto& [int_id, count] : butterfly_counts) {
@@ -212,17 +212,13 @@ int main(int argc, char *argv[]) {
 
 	auto peel_order = g.peel_vertices_by_butterfly_count(butterfly_counts);
 
-		std::cout << "\n\nProcess " << rank << ": Vertex (rank) peeling order based on butterfly participation: ";
-		for (int v : peel_order) {
-			std::cout << v << " ";
+	std::cout << "\n\nProcess " << rank << ": Vertex (rank) peeling order based on butterfly participation: ";
+	for (int v : peel_order) {
+	    std::cout << v << " ";
 	}
 	std::cout << std::endl;
 
-	//------------------------------------
-	
-	    // ... [previous code remains unchanged]
-
-    auto butterfly_edges = g.count_butterflies_edge();
+	auto butterfly_edges = g.count_butterflies_edge(); //!!
 
     // Process and print EDGE results
     for (const auto& [edge_pair, count] : butterfly_edges) {
@@ -236,8 +232,16 @@ int main(int argc, char *argv[]) {
                       << count << " butterflies\n";
         }
     }
+// After edge counting
+auto edge_butterflies = g.count_butterflies_edge();
+auto edge_peel_order = g.peel_edges_by_butterfly_count(edge_butterflies);
 
-
+std::cout << "\nProcess " << rank << ": Edge peeling order:\n";
+for (const auto& edge : edge_peel_order) {
+    std::cout << "(" << id_to_vertex[edge.first] 
+              << " - " << id_to_vertex[edge.second] << ") ";
+}
+std::cout << std::endl;
 
     MPI_Finalize();
     return 0;
