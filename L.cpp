@@ -12,6 +12,18 @@
 #include <algorithm>
 using namespace std;
 
+std::tuple<int,int,int> bipartite_stats(
+    const std::vector<std::pair<idx_t,idx_t>>& edges
+) {
+    int E = edges.size();
+    std::unordered_set<idx_t> U, V;
+    for (auto &e : edges) {
+        U.insert(e.first);
+        V.insert(e.second);
+    }
+    return { E, (int)U.size(), (int)V.size() };
+}
+
 int main(int argc, char *argv[]) {
     MPI_Init(&argc, &argv);
     int rank, size;
@@ -219,7 +231,7 @@ int main(int argc, char *argv[]) {
 	std::cout << std::endl;
 
 	auto butterfly_edges = g.count_butterflies_edge(); //!!
-
+	int total_count = 0;
     // Process and print EDGE results
     for (const auto& [edge_pair, count] : butterfly_edges) {
         if (count > 0) {
@@ -230,6 +242,7 @@ int main(int argc, char *argv[]) {
             std::cout << "Process " << rank << ": Edge (" 
                       << u_name << " - " << v_name << ") is part of "
                       << count << " butterflies\n";
+            total_count += count;
         }
     }
 // After edge counting
@@ -242,6 +255,12 @@ for (const auto& edge : edge_peel_order) {
               << " - " << id_to_vertex[edge.second] << ") ";
 }
 std::cout << std::endl;
+	
+		auto [E, numU, numV] = bipartite_stats(edges);
+	std::cout <<"Total edges = "<< E
+		      << ", |U| = "<< numU
+		      << ", |V| = "<< numV<<std::endl;
+	std::cout<<"Total number of butterflies: "<<total_count<<std::endl;
 
     MPI_Finalize();
     return 0;
