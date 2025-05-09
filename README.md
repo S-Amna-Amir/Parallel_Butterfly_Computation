@@ -5,8 +5,8 @@ This project implements parallel algorithms for butterfly counting and peeling i
 ---
 
 ## Team Members
-- Amna  
-- Maha
+- Amna Amir
+- Maha Qaiser
 
 ## Course
 Parallel and Distributed Computing (PDC)
