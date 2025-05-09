@@ -2,8 +2,6 @@
 
 This project implements parallel algorithms for butterfly counting and peeling in bipartite graphs, based on the research paper **"Parallel Algorithms for Butterfly Computations" by Jessica Shi and Julian Shun**.
 
-![image](https://github.com/user-attachments/assets/366436ff-2a01-464b-afa2-db7f842c18ba)
-
 ---
 
 ## Team Members
