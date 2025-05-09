@@ -52,9 +52,8 @@ public:
     std::unordered_map<std::pair<int, int>, int, PairHash> count_butterflies_edge() const;
     
     // Peeling
-    std::vector<int> peel_vertices_by_butterfly_count(const std::unordered_map<int, int>&) const;
-    std::vector<std::pair<int, int>> peel_edges_by_butterfly_count(
-        const std::unordered_map<std::pair<int, int>, int, PairHash>&) const;
+    std::vector<int> peel_vertices_by_butterfly_count(const std::unordered_map<int, int>&, int& num_iterations) const;
+    std::vector<std::pair<int, int>> peel_edges_by_butterfly_count(const std::unordered_map<std::pair<int, int>, int, PairHash>&, int& num_iterations) const;
 };
 
 #endif

@@ -7,16 +7,13 @@
 #include <omp.h>
 #include <queue>
 #include <utility>
-
 std::vector<std::pair<int, int>> Graph::peel_edges_by_butterfly_count(
-    const std::unordered_map<std::pair<int, int>, int, PairHash>& edge_counts) const 
+    const std::unordered_map<std::pair<int, int>, int, PairHash>& edge_counts, int& num_iterations) const 
 {
-    // Copy counts and create mutable adjacency structure
     std::unordered_map<std::pair<int, int>, int, PairHash> counts = edge_counts;
     std::unordered_set<std::pair<int, int>, PairHash> removed_edges;
     std::vector<std::pair<int, int>> peel_order;
 
-    // Create adjacency map with edge sets
     std::unordered_map<int, std::unordered_set<int>> adj_map;
     for (size_t i = 0; i < local_vertex_ids.size(); ++i) {
         int u = local_vertex_ids[i];
@@ -25,101 +22,97 @@ std::vector<std::pair<int, int>> Graph::peel_edges_by_butterfly_count(
             adjacency_list[i].end()
         );
     }
-
+    
+    num_iterations = 0;
     while (!counts.empty()) {
-        // Find edge with minimum butterfly count
-        auto min_it = std::min_element(
+        // Find current minimum butterfly count
+        int min_count = std::min_element(
             counts.begin(), counts.end(),
-            [](const auto& a, const auto& b) { return a.second < b.second; });
-        
-        auto edge = min_it->first;
-        peel_order.push_back(edge);
-        removed_edges.insert(edge);
-        counts.erase(edge);
+            [](const auto& a, const auto& b) { return a.second < b.second; })->second;
 
-        // Remove edge from adjacency lists
-        #pragma omp parallel sections
-        {
-            #pragma omp section
-            {
-                if (adj_map[edge.first].count(edge.second)) {
-                    adj_map[edge.first].erase(edge.second);
-                }
-            }
-            #pragma omp section
-            {
-                if (adj_map[edge.second].count(edge.first)) {
-                    adj_map[edge.second].erase(edge.first);
-                }
+        // Collect all edges with the minimum count (bucket)
+        std::vector<std::pair<int, int>> bucket;
+        for (const auto& [e, count] : counts) {
+            if (count == min_count) {
+                bucket.push_back(e);
             }
         }
 
-        // Find affected edges (edges in triangles/wedges with removed edge)
+        // Remove all edges in the bucket
+        for (const auto& edge : bucket) {
+            peel_order.push_back(edge);
+            removed_edges.insert(edge);
+            counts.erase(edge);
+
+            // Remove edge from adjacency map
+            if (adj_map[edge.first].count(edge.second)) {
+                adj_map[edge.first].erase(edge.second);
+            }
+            if (adj_map[edge.second].count(edge.first)) {
+                adj_map[edge.second].erase(edge.first);
+            }
+        }
+
+        // Find affected edges (edges in wedges/triangles involving removed edges)
         std::unordered_set<std::pair<int, int>, PairHash> affected;
         #pragma omp parallel
         {
             std::unordered_set<std::pair<int, int>, PairHash> private_affected;
-            
-            // Check both endpoints of removed edge
-            #pragma omp for nowait
-            for (int endpoint : {edge.first, edge.second}) {
-                if (adj_map.find(endpoint) == adj_map.end()) continue;
-                
-                for (int neighbor : adj_map[endpoint]) {
-                    // Check edges connecting to neighbors
-                    auto e1 = OrderedPair(endpoint, neighbor);
-                    if (!removed_edges.count(e1)) {
-                        private_affected.insert(e1);
-                    }
-                    
-                    // Check edges between neighbors
-                    for (int second_neighbor : adj_map[neighbor]) {
-                        if (second_neighbor == endpoint) continue;
-                        auto e2 = OrderedPair(neighbor, second_neighbor);
-                        if (!removed_edges.count(e2)) {
-                            private_affected.insert(e2);
+
+            #pragma omp for
+            for (size_t i = 0; i < bucket.size(); ++i) {
+                auto [u, v] = bucket[i];
+                for (int endpoint : {u, v}) {
+                    if (adj_map.find(endpoint) == adj_map.end()) continue;
+
+                    for (int neighbor : adj_map[endpoint]) {
+                        auto e1 = OrderedPair(endpoint, neighbor);
+                        if (!removed_edges.count(e1)) {
+                            private_affected.insert(e1);
+                        }
+
+                        for (int second_neighbor : adj_map[neighbor]) {
+                            if (second_neighbor == endpoint) continue;
+                            auto e2 = OrderedPair(neighbor, second_neighbor);
+                            if (!removed_edges.count(e2)) {
+                                private_affected.insert(e2);
+                            }
                         }
                     }
                 }
             }
-            
+
             #pragma omp critical
             affected.insert(private_affected.begin(), private_affected.end());
         }
 
-        // Recompute counts for affected edges
+        // Recompute butterfly counts for affected edges
+        std::vector<std::pair<int, int>> affected_vec(affected.begin(), affected.end());
         #pragma omp parallel for
-        for (size_t idx = 0; idx < affected.size(); ++idx) {
-            auto it = affected.begin();
-            std::advance(it, idx);
-            auto e = *it;
-            
+        for (size_t idx = 0; idx < affected_vec.size(); ++idx) {
+            auto e = affected_vec[idx];
             if (removed_edges.count(e)) continue;
-            
-            // Simplified butterfly count for edge (u,v)
-            int count = 0;
+
             int u = e.first, v = e.second;
-            
             if (adj_map[u].size() > adj_map[v].size()) std::swap(u, v);
-            
+
+            int count = 0;
             for (int w : adj_map[u]) {
                 if (w == v) continue;
                 if (adj_map[v].count(w)) {
                     count += (adj_map[u].size() - 1) * (adj_map[v].size() - 1);
                 }
             }
-            
+
             #pragma omp critical
-            {
-                if (counts.find(e) != counts.end()) {
-                    counts[e] = count;
-                }
-            }
+            counts[e] = count;
         }
+        num_iterations++;
     }
 
     return peel_order;
 }
+
 //==========================================================================
 // Algorithm 4: Parallel work-efficient butterfly counting per edge
 
@@ -201,7 +194,10 @@ std::unordered_map<std::pair<int, int>, int, PairHash> Graph::count_butterflies_
 }
 //==========================================================================
 
-std::vector<int> Graph::peel_vertices_by_butterfly_count(const std::unordered_map<int, int>& butterfly_counts) const {
+std::vector<int> Graph::peel_vertices_by_butterfly_count(
+    const std::unordered_map<int, int>& butterfly_counts,
+    int& num_iterations) const
+{
     std::unordered_map<int, int> counts = butterfly_counts;
     std::unordered_set<int> removed;
     std::vector<int> peel_order;
@@ -212,60 +208,67 @@ std::vector<int> Graph::peel_vertices_by_butterfly_count(const std::unordered_ma
         adj_map[local_vertex_ids[i]] = adjacency_list[i];
     }
 
-    while (!counts.empty()) {
-        // Sequential: Find minimum element
-        auto min_it = std::min_element(
-            counts.begin(), counts.end(),
-            [](const auto& a, const auto& b) { return a.second < b.second; });
-        
-        int v = min_it->first;
-        peel_order.push_back(v);
-        removed.insert(v);
-        counts.erase(v);
+    num_iterations = 0;
 
-        // Parallel: Remove v from neighbors' lists
-        if (adj_map.find(v) != adj_map.end()) {
-            #pragma omp parallel for
-            for (size_t idx = 0; idx < adj_map[v].size(); ++idx) {
-                int neighbor = adj_map[v][idx];
-                if (adj_map.find(neighbor) != adj_map.end()) {
-                    #pragma omp critical
-                    {
-                        auto& nl = adj_map[neighbor];
-                        nl.erase(std::remove(nl.begin(), nl.end(), v), nl.end());
-                    }
-                }
+    while (!counts.empty()) {
+        // Find the current minimum butterfly count
+        int min_butterfly = std::min_element(
+            counts.begin(), counts.end(),
+            [](const auto& a, const auto& b) { return a.second < b.second; })->second;
+
+        // Gather all vertices with this min count
+        std::vector<int> bucket;
+        for (const auto& [v, count] : counts) {
+            if (count == min_butterfly) {
+                bucket.push_back(v);
             }
-            adj_map.erase(v);
         }
 
-        // Parallel: Find affected vertices
-        std::unordered_set<int> affected;
-        if (adj_map.find(v) != adj_map.end()) {
-            #pragma omp parallel
-            {
-                std::unordered_set<int> private_affected;
-                #pragma omp for
+        // Remove all vertices in the current bucket
+        for (int v : bucket) {
+            peel_order.push_back(v);
+            removed.insert(v);
+            counts.erase(v);
+
+            // Remove v from adjacency lists of its neighbors
+            if (adj_map.find(v) != adj_map.end()) {
+                #pragma omp parallel for
                 for (size_t idx = 0; idx < adj_map[v].size(); ++idx) {
-                    int u = adj_map[v][idx];
-                    if (!removed.count(u)) {
-                        private_affected.insert(u);
-                        if (adj_map.find(u) != adj_map.end()) {
-                            for (int w : adj_map[u]) {
-                                if (!removed.count(w)) private_affected.insert(w);
-                            }
+                    int neighbor = adj_map[v][idx];
+                    if (adj_map.find(neighbor) != adj_map.end()) {
+                        #pragma omp critical
+                        {
+                            auto& nl = adj_map[neighbor];
+                            nl.erase(std::remove(nl.begin(), nl.end(), v), nl.end());
                         }
                     }
                 }
-                #pragma omp critical
-                affected.insert(private_affected.begin(), private_affected.end());
+                adj_map.erase(v);
             }
         }
 
-        // Convert to vector for parallel access
+        // Track all affected vertices
+        std::unordered_set<int> affected;
+        for (int v : bucket) {
+            if (adj_map.find(v) == adj_map.end()) continue;
+
+            for (int u : adj_map[v]) {
+                if (removed.count(u)) continue;
+                affected.insert(u);
+
+                if (adj_map.find(u) != adj_map.end()) {
+                    for (int w : adj_map[u]) {
+                        if (!removed.count(w)) {
+                            affected.insert(w);
+                        }
+                    }
+                }
+            }
+        }
+
         std::vector<int> affected_vec(affected.begin(), affected.end());
 
-        // Parallel: Recompute counts
+        // Recompute butterfly counts for affected vertices
         #pragma omp parallel for
         for (size_t idx = 0; idx < affected_vec.size(); ++idx) {
             int u = affected_vec[idx];
@@ -276,8 +279,8 @@ std::vector<int> Graph::peel_vertices_by_butterfly_count(const std::unordered_ma
             for (size_t i = 0; i < neighbors.size(); ++i) {
                 int n1 = neighbors[i];
                 if (adj_map.find(n1) == adj_map.end() || removed.count(n1)) continue;
-                
-                for (size_t j = i+1; j < neighbors.size(); ++j) {
+
+                for (size_t j = i + 1; j < neighbors.size(); ++j) {
                     int n2 = neighbors[j];
                     if (adj_map.find(n2) != adj_map.end() && !removed.count(n2)) {
                         const auto& n1_neighbors = adj_map[n1];
@@ -287,10 +290,12 @@ std::vector<int> Graph::peel_vertices_by_butterfly_count(const std::unordered_ma
                     }
                 }
             }
-            
+
             #pragma omp critical
             counts[u] = b_count;
         }
+
+        num_iterations++; // Count one layer of peeling
     }
 
     return peel_order;
