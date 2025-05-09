@@ -245,22 +245,40 @@ int main(int argc, char *argv[]) {
             total_count += count;
         }
     }
-// After edge counting
-auto edge_butterflies = g.count_butterflies_edge();
-auto edge_peel_order = g.peel_edges_by_butterfly_count(edge_butterflies);
-
-std::cout << "\nProcess " << rank << ": Edge peeling order:\n";
-for (const auto& edge : edge_peel_order) {
-    std::cout << "(" << id_to_vertex[edge.first] 
+	// After edge counting
+	auto edge_butterflies = g.count_butterflies_edge();
+	auto edge_peel_order = g.peel_edges_by_butterfly_count(edge_butterflies);
+	
+	std::cout << "\nProcess " << rank << ": Edge peeling order:\n";
+	for (const auto& edge : edge_peel_order) 
+	{
+    	std::cout << "(" << id_to_vertex[edge.first] 
               << " - " << id_to_vertex[edge.second] << ") ";
-}
-std::cout << std::endl;
+	}
+	std::cout << std::endl;
+	cout<<"Process: "<<rank<<" Butterflies: "<<total_count/4<<endl;
 	
 		auto [E, numU, numV] = bipartite_stats(edges);
 	std::cout <<"Total edges = "<< E
 		      << ", |U| = "<< numU
 		      << ", |V| = "<< numV<<std::endl;
-	std::cout<<"Total number of butterflies: "<<total_count<<std::endl;
+		      
+	int global_total = 0;
+	MPI_Reduce(
+    &total_count,        // send buffer (this rank’s value)
+    &global_total,       // recv buffer (only valid on root)
+    1,                   // number of elements
+    MPI_INT,             // data type
+    MPI_SUM,             // operation
+    0,                   // root rank
+    MPI_COMM_WORLD       // communicator
+	);
+	
+	if (rank == 0) {
+    std::cout << "Total number of butterflies (all processes) = "
+              << global_total/4 << "\n";
+	}
+	
 
     MPI_Finalize();
     return 0;
