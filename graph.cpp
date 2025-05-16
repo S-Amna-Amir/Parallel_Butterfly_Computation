@@ -62,7 +62,7 @@ std::vector<std::pair<int, int>> Graph::peel_edges_by_butterfly_count(const std:
         {
             std::unordered_set<std::pair<int, int>, PairHash> private_affected;
 
-            #pragma omp for
+            #pragma omp for schedule(dynamic, 300)
             for (size_t i = 0; i < bucket.size(); ++i) 
             {
                 auto [u, v] = bucket[i];
@@ -97,7 +97,7 @@ std::vector<std::pair<int, int>> Graph::peel_edges_by_butterfly_count(const std:
 
         //recompute butterfly counts for affected edges
         std::vector<std::pair<int, int>> affected_vec(affected.begin(), affected.end());
-        #pragma omp parallel for
+        #pragma omp parallel for schedule(dynamic, 300)
         for (size_t idx = 0; idx < affected_vec.size(); ++idx) 
         {
             auto e = affected_vec[idx];
@@ -140,7 +140,7 @@ std::unordered_map<std::pair<int, int>, int, PairHash> Graph::count_butterflies_
     {
         std::unordered_map<EndpointPair, std::vector<int>, PairHash> local_groups;
 
-        #pragma omp for nowait
+        #pragma omp for nowait schedule(dynamic, 300)
         for (size_t i = 0; i < wedges.size(); ++i) 
         {
             const auto& wedge = wedges[i];
@@ -170,7 +170,7 @@ std::unordered_map<std::pair<int, int>, int, PairHash> Graph::count_butterflies_
     {
         std::unordered_map<EndpointPair, int, PairHash> local_counts;
 
-        #pragma omp for nowait
+        #pragma omp for nowait schedule(dynamic, 300)
         for (size_t idx = 0; idx < groups_vector.size(); ++idx) 
         {
             const auto& entry = groups_vector[idx];
@@ -250,7 +250,7 @@ std::vector<int> Graph::peel_vertices_by_butterfly_count(const std::unordered_ma
             //remove vertex from neighbors' adjacency lists
             if (adj_map.find(v) != adj_map.end()) 
             {
-                #pragma omp parallel for
+                #pragma omp parallel for schedule(dynamic, 300)
                 for (size_t idx = 0; idx < adj_map[v].size(); ++idx) 
                 {
                     int neighbor = adj_map[v][idx];
@@ -294,7 +294,7 @@ std::vector<int> Graph::peel_vertices_by_butterfly_count(const std::unordered_ma
         std::vector<int> affected_vec(affected.begin(), affected.end());
 
         //recompute butterfly counts for affected vertices
-        #pragma omp parallel for
+        #pragma omp parallel for schedule(dynamic, 300)
         for (size_t idx = 0; idx < affected_vec.size(); ++idx) 
         {
             int u = affected_vec[idx];
@@ -352,7 +352,7 @@ std::unordered_map<int, int> Graph::count_butterflies_vertex() const
     #pragma omp parallel //parallel processing of wedges
     {
         std::unordered_map<int, int> local_counts;
-        #pragma omp for nowait
+        #pragma omp for nowait schedule(dynamic, 300)
         for (size_t i = 0; i < wedges.size(); ++i) 
         {
             const auto& wedge = wedges[i];
@@ -391,6 +391,8 @@ std::unordered_map<int, int> Graph::count_butterflies_vertex() const
     return butterfly_counts;
 }
 
+//==========================================================================
+
 std::vector<Wedge> Graph::get_wedges() const //generate all wedges (u-v-w paths) in the graph
 {
     std::vector<Wedge> wedges;
@@ -398,7 +400,7 @@ std::vector<Wedge> Graph::get_wedges() const //generate all wedges (u-v-w paths)
     #pragma omp parallel //parallel wedge generation
     {
         std::vector<Wedge> local_wedges;
-        #pragma omp for nowait
+        #pragma omp for nowait schedule(dynamic, 150)
         for (size_t i = 0; i < local_vertex_ids.size(); ++i) 
         {
             int u = local_vertex_ids[i];
@@ -530,7 +532,7 @@ void Graph::preprocess()
     }
 
     //step 10: rename neighbors in adjacency lists and sort them
-    #pragma omp parallel for
+    #pragma omp parallel for schedule(dynamic, 150)
     for (size_t i = 0; i < adjacency_list.size(); ++i) 
     {
         auto& neighbors = adjacency_list[i];
@@ -543,7 +545,7 @@ void Graph::preprocess()
 
     //step 11: compute deg_u for each local vertex
     deg_u.resize(local_vertex_count);
-    #pragma omp parallel for
+    #pragma omp parallel for schedule(dynamic, 150)
     for (size_t i = 0; i < adjacency_list.size(); ++i) 
     {
         int u_rank = local_vertex_ids[i];
